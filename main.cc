@@ -1,9 +1,10 @@
 #include <iostream>
+#include <string>
+#include <unistd.h>
 #include <cstdlib>
 #include <cstdio>
 #include <cerrno>
 #include <cstring>
-#include <unistd.h>
 
 #include <netdb.h>
 #include <sys/socket.h>
@@ -12,14 +13,28 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <nlohmann/json.hpp>
 
 const char *HOST_NAME   = "discord.com";
 
 using SOCKET = int;
+using json = nlohmann::json;
+
+namespace color {
+    constexpr const char* reset   = "\033[0m";
+    constexpr const char* red     = "\033[31m";
+    constexpr const char* green   = "\033[32m";
+    constexpr const char* yellow  = "\033[33m";
+    constexpr const char* blue    = "\033[34m";
+    constexpr const char* bold    = "\033[1m";
+}
 
 // Remember to free relevant items when done;
 // addrinfo struct (linked list) needs to be freed after address is obtained
 
+bool verify_content_type_json();
+std::size_t get_content_length(std::string_view http_response);
+std::string get_payload_str(std::string_view http_response);
 void boot();
 
 int main()
@@ -151,7 +166,6 @@ void boot()
                 std::cerr << "Failed to connect to the server\n";
                 if (SSL_get_verify_result(ssl) != X509_V_OK)
                 {
-                        std::cout << "Inside for loop\n";
                         std::cerr << "Verify error: " << X509_verify_cert_error_string(SSL_get_verify_result(ssl)) << "\n";
                 }
                 exit(EXIT_FAILURE);
@@ -159,22 +173,23 @@ void boot()
 
         // Sending and Receiving Data
         size_t written;
-        const char *req = "GET /api/v10/gateway HTTP/1.1\r\nHost: discord.com\r\nUser-Agent: SPECTRE/1.0.0\r\nAccept: */*\r\n\r\n\r\n";
+        
+        // Connection: close since we only care for the ws url the server sends
+        const char *req = "GET /api/v10/gateway HTTP/1.1\r\nHost: discord.com\r\nUser-Agent: SPECTRE/1.0.0\r\nAccept: */*\r\nConnection: close\r\n\r\n\r\n";
         if (!SSL_write_ex(ssl, req, strlen(req), &written))
         {
                 std::cerr << "Failed to write HTTP request\n";
                 exit(EXIT_FAILURE);
         }
-
+        
         size_t read_bytes;
-        char buf[160];
-
-        while(SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes))
-        {
-                fwrite(buf, 1, read_bytes, stdout);
-        }
-        std::cout << "\n";
-
+        char buf[256];
+        std::string str;
+        while(SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes)) str.append(buf, read_bytes);
+        
+        std::cout << "Recieved JSON Payload is: \n"; 
+        std::cout << get_payload_str(str);
+        
         if (SSL_get_error(ssl, 0) != SSL_ERROR_ZERO_RETURN)
         {
                 std::cerr << "Failed reading remaining data\n";
@@ -190,4 +205,23 @@ void boot()
         }
         SSL_free(ssl);
         SSL_CTX_free(ctx);
+}
+
+std::size_t get_content_length(std::string_view http_response) 
+{
+        std::size_t pos = http_response.find_first_of("Content-Length: ");
+        std::size_t bpos = http_response.find_first_of(" ", pos) + 1;
+        std::size_t epos = http_response.find_first_of("\n", bpos);
+        std::size_t len = epos - bpos;
+        std::string str(http_response.substr(bpos, len));
+        return (std::size_t) std::stoull(str, nullptr);
+}
+
+std::string get_payload_str(std::string_view http_response)
+{
+        std::size_t payload_len = get_content_length(http_response);
+        std::size_t epos = http_response.find_last_of("}") + 1;
+        std::size_t bpos = http_response.find_first_of("{", epos - payload_len);
+        std::string ret(http_response.substr(bpos, payload_len));
+        return ret;
 }

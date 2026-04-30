@@ -1,1 +1,1 @@
-g++ main.cc -o main -lssl -lcrypto -g
+g++ main.cc -o prog -lssl -lcrypto -g

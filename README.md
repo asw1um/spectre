@@ -1,6 +1,10 @@
 # spectre
 minimal implementation of Discord Bot API
 
+# Requirements
+[nlohmann/json](https://github.com/nlohmann/json)
+[OpenSSL C Libraries](https://github.com/openssl/openssl)
+
 # compilation
 ```
 g++ main.cc -o main -lssl -lcrypto -g
