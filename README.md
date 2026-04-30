@@ -39,3 +39,20 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 
 # TODO 
 -   [ ] Use Get Gateway Bot instead of Get Gateway (Boot Process)
+-   [ ] Cstd::cout << hange relevant std::size_t lens to initialize to std::string::npos
+-   [ ] Use autotools to make a compilation script
+-   [ ] Remember to free relevant items when done
+-   [ ] addrinfo struct (linked list) needs to be freed after address is obtained
+-   [ ] Think of a better class name (rather than bot)
+-   [ ] Set up a logging fd so log events trigger an event in epoll to print something during the infinite loop
+-   [ ] Refactor socket creation and ssl setup so that there is less code repetition
+-   [ ] Replace relevant couts with cerr
+-   [ ] Abstract basic select() waiting (needed for handshake and shutdown)
+-   [ ] Replace relevant bools with enums
+-   [ ] handle_io_errors() should return enum not int
+
+# Notes
+- string_view is faster than std::string& so use string_view for read-only operations
+- CRLF separates header and payload (we assume discord api behaves nicely)
+- Each line ends with a CRLF, whereas header ends with CRLFCRLF
+- Content-Length int contans \n at end of payload

@@ -45,8 +45,7 @@ class bot
         private:
                 std::string ws_url;
                 void set_ws_url();
-                void wait_for_select_read_write(SSL *ssl, bool write);
-                int handle_io_errors(SSL *ssl, int return_value);
+                void wait_for_hello(SSL *ssl);
         public:
                 bot()
                 {
@@ -156,79 +155,106 @@ void bot::run()
                 std::cerr << "Failed to set the certificate verification hostname\n";
                 exit(EXIT_FAILURE);
         }
-        int ret_ssl_connect = -1;
-        while((ret_ssl_connect = SSL_connect(ssl)) != 1)
-        {
-                if (handle_io_errors(ssl, ret_ssl_connect) == 1) continue;
-                std::cerr << "Failed to connect to server\n";
-                exit(EXIT_FAILURE);
-        }
         
+        // int ssl_conn_status = -1;
+        // while ( (ssl_conn_status = SSL_connect(ssl) ) != 1)
+        // {
+        //         // First we have to send WebSocket Upgrade Header
+        //         if ((int)SSL_get_error(ssl, ssl_conn_status) == (int)SSL_ERROR_WANT_WRITE)
+        //         {
+        //                 fd_set fds;
+        //                 int width = main_sock + 1;
+        //                 FD_ZERO(&fds);
+        //                 FD_SET(main_sock, &fds);
+        //                 select(width, NULL, &fds, NULL, NULL);
+        //                 continue;
+        //         }
+        //         std::cerr << "Failed to connect to server\n"; 
+        //         exit(EXIT_FAILURE);
+        // }
+        while(true)
+        {
+                int ret = SSL_connect(ssl);
+                if (ret == 1) break;
+                int err = SSL_get_error(ssl, ret);
+                fd_set fds;
+                int width = main_sock + 1;
+                FD_ZERO(&fds);
+                FD_SET(main_sock, &fds);
+                switch(err)
+                {
+                        case SSL_ERROR_WANT_WRITE:
+                                select(width, NULL, &fds, NULL, NULL);
+                                continue;
+                        case SSL_ERROR_WANT_READ:
+                                select(width, &fds, NULL, NULL, NULL);
+                                continue;
+                        default:
+                                exit(EXIT_FAILURE);
+                }
+        }
         // Send Upgrade Request Header
         unsigned char rand_bytes[16];
         RAND_bytes(rand_bytes, sizeof(rand_bytes));
         unsigned char encoded[25];
         int encoded_len = EVP_EncodeBlock(encoded, rand_bytes, 16);
+        // BIO *b64 = BIO_new(BIO_f_base64());
+        // BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+        // BIO *mem = BIO_new(BIO_s_mem());
+        // BIO *chain = BIO_push(b64, mem);
+        //
+        // BIO_write(chain, rand_bytes, 16);
+        // BIO_flush(chain);
+        // char *encoded_data;
+        // long encoded_len = BIO_get_mem_data(mem, &encoded_data);
+        // string::string key(encoded_data, encoded_len);
+        //
+        // BIO_free_all(chain);
+
+        
+        // Generate Random Bytes
         int needed = std::snprintf(nullptr, 0, "GET /?v=10&encoding=json HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", ws_host_name.data(), encoded);
         std::string s(needed, '\0');
         std::snprintf(s.data(), needed + 1, "GET /?v=10&encoding=json HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", ws_host_name.data(), encoded);
-
-        size_t written_bytes = 0;
-        while(!SSL_write_ex(ssl, s.data(), strlen(s.data()), &written_bytes))
-        {
-                if (handle_io_errors(ssl, 0) == 1)
-                        continue;
-                std::cerr << "Failed to write HTTP Request\n";
-                exit(EXIT_FAILURE);
-        }
-
-        // READ
-        int eof = 0;
-        char buf[256];
-        size_t read_bytes;
-        std::string str;
-        while (!eof)
-        {
-                while (!eof && !SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes))
-                {
-                        switch(handle_io_errors(ssl, 0))
-                        {
-                                case 1:
-                                        continue;
-                                case 0:
-                                        eof = 1;
-                                        continue;
-                                default:
-                                        std::cerr << "Failed reaading remaining data\n";
-                                        exit(EXIT_FAILURE);
-                        }
-                }
-                if (!eof) fwrite(buf, 1, read_bytes, stdout);
-        }
-        std::cout << "\n";
+        std::cout << s;
 
         // Shutdown
-        int ret_shutdown = -1;
-        while ((ret_shutdown = SSL_shutdown(ssl)) != 1)
+        int ret;
+        while ( (ret = SSL_shutdown(ssl)) != -1 )
         {
-                if (ret_shutdown < 0 && handle_io_errors(ssl, ret_shutdown) == 1) continue;
-                std::cerr << "Fatal error while shutting down\n";
-                exit(EXIT_FAILURE);
+                if (ret < 0)
+                {
+                        int err = SSL_get_error(ssl, ret);
+                        fd_set fds;
+                        int width = main_sock + 1;
+                        FD_ZERO(&fds);
+                        FD_SET(main_sock, &fds);
+                        switch(err)
+                        {
+                                case SSL_ERROR_WANT_WRITE:
+                                        select(width, NULL, &fds, NULL, NULL);
+                                        continue;
+                                case SSL_ERROR_WANT_READ:
+                                        select(width, &fds, NULL, NULL, NULL);
+                                        continue;
+                                default:
+                                        exit(EXIT_FAILURE);
+                        }
+
+                }
         }
-        SSL_free(ssl);
-        SSL_CTX_free(ctx);
+        // if (ret < 1 ) 
+        // {
+        //         std::cerr << "Error shutting down\n";
+        //         exit(EXIT_FAILURE);
+        // }
+        // SSL_free(ssl);
+        // SSL_CTX_free(ctx);
 }
 
-void bot::wait_for_select_read_write(SSL *ssl, bool write)
+void bot::wait_for_hello(SSL *ssl)
 {
-        fd_set fds;
-        int width, sock;
-        sock = SSL_get_fd(ssl);
-        width = sock + 1;
-        FD_ZERO(&fds);
-        FD_SET(sock, &fds);
-        if (write) select(width, NULL, &fds, NULL, NULL);
-        else select(width, &fds, NULL, NULL, NULL);
+
 }
 
 void bot::set_ws_url()
@@ -418,29 +444,4 @@ std::string get_payload_str(std::string_view http_response)
         std::size_t bpos = http_response.find_first_of("{", epos - payload_len);
         std::string ret(http_response.substr(bpos, payload_len));
         return ret;
-}
-
-int bot::handle_io_errors(SSL *ssl, int return_value)
-{
-        switch(SSL_get_error(ssl, return_value))
-        {
-                case SSL_ERROR_WANT_READ:
-                        wait_for_select_read_write(ssl, false);
-                        return 1;
-                case SSL_ERROR_WANT_WRITE:
-                        wait_for_select_read_write(ssl, true);
-                        return 1;
-                case SSL_ERROR_ZERO_RETURN:
-                        return 0;
-                case SSL_ERROR_SYSCALL:
-                        return -1;
-                case SSL_ERROR_SSL:
-                        if (SSL_get_verify_result(ssl) != X509_V_OK)
-                        {
-                                std::cout << X509_verify_cert_error_string(SSL_get_verify_result(ssl));
-                        }
-                        return -1;
-                default:
-                        return -1;
-        }
 }
