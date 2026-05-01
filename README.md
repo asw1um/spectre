@@ -39,7 +39,7 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 
 # TODO 
 -   [ ] Use Get Gateway Bot instead of Get Gateway (Boot Process)
--   [ ] Cstd::cout << hange relevant std::size_t lens to initialize to std::string::npos
+-   [ ] Change relevant std::size_t lens to initialize to std::string::npos
 -   [ ] Use autotools to make a compilation script
 -   [ ] Remember to free relevant items when done
 -   [ ] addrinfo struct (linked list) needs to be freed after address is obtained
@@ -47,7 +47,7 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Set up a logging fd so log events trigger an event in epoll to print something during the infinite loop
 -   [ ] Refactor socket creation and ssl setup so that there is less code repetition
 -   [ ] Replace relevant couts with cerr
--   [ ] Abstract basic select() waiting (needed for handshake and shutdown)
+-   [x] Abstract basic select() waiting (needed for handshake and shutdown)
 -   [ ] Replace relevant bools with enums
 -   [ ] handle_io_errors() should return enum not int
 
