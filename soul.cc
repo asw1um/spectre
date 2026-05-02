@@ -1,18 +1,19 @@
 #include "spectre.h"
 
 using SOCKET = int;
+using namespace spctr;
 
-spctr::soul::soul()
+soul::soul()
 {
         this->set_ws_url();
 }
 
-spctr::soul::~soul()
+soul::~soul()
 {
         std::cout << "Destroying soul object.\n";
 }
 
-void spctr::soul::form()
+void soul::form()
 {
         std::string ws_host_name = this->ws_url;
         extract_host_name(ws_host_name);
@@ -104,7 +105,7 @@ void spctr::soul::form()
         int ret_ssl_connect = -1;
         while((ret_ssl_connect = SSL_connect(ssl)) != 1)
         {
-                if (handle_io_errors(ssl, ret_ssl_connect) == spctr::SSL_ERROR::TAME) continue;
+                if (handle_io_errors(ssl, ret_ssl_connect) == SSL_ERROR::TAME) continue;
                 std::cerr << "Failed to connect to server\n";
                 exit(EXIT_FAILURE);
         }
@@ -121,7 +122,7 @@ void spctr::soul::form()
         size_t written_bytes = 0;
         while(!SSL_write_ex(ssl, s.data(), strlen(s.data()), &written_bytes))
         {
-                if (handle_io_errors(ssl, 0) == spctr::SSL_ERROR::TAME)
+                if (handle_io_errors(ssl, 0) == SSL_ERROR::TAME)
                         continue;
                 std::cerr << "Failed to write HTTP Request\n";
                 exit(EXIT_FAILURE);
@@ -129,18 +130,23 @@ void spctr::soul::form()
 
         // READ
         int eof = 0;
-        char buf[256];
+        char buf[512];
         size_t read_bytes;
         std::string str;
+        std::string data_frame;
+
+        std::string frame;
+        bool PAYLOAD_FOUND = false;
+        unsigned long payload_length = 0;
         while (!eof)
         {
                 while (!eof && !SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes))
                 {
                         switch(handle_io_errors(ssl, 0))
                         {
-                                case spctr::SSL_ERROR::TAME:
+                                case SSL_ERROR::TAME:
                                         continue;
-                                case spctr::SSL_ERROR::END_OF_FILE:
+                                case SSL_ERROR::END_OF_FILE:
                                         eof = 1;
                                         continue;
                                 default:
@@ -148,15 +154,48 @@ void spctr::soul::form()
                                         exit(EXIT_FAILURE);
                         }
                 }
-                if (!eof) str.append(buf, read_bytes);
+                if (!eof) 
+                {
+                        str.append(buf, read_bytes);
+                        if (PAYLOAD_FOUND == false)
+                        {
+                                std::string_view sv(str);
+                                std::size_t payload_pos = sv.find("\r\n\r\n");
+                                if (payload_pos != std::string::npos)
+                                {
+                                        if ((payload_pos + 4) < sv.length()) 
+                                        {
+                                                frame.append(sv.substr(payload_pos));
+                                        }
+                                        PAYLOAD_FOUND = true;
+                                }
+                        }
+                        else 
+                        {
+                                frame.append(buf, read_bytes);
+                                if (payload_length == 0) payload_length = df_get_payload_length(frame);
+                                std::string_view sv(frame);
+                                std::size_t first_bracket_pos = sv.find_first_of("{");
+                                std::size_t last_bracket_pos = sv.find_last_of("}");
+                                std::size_t theo_len = last_bracket_pos - first_bracket_pos + 1;        // +1 to account for zero-based indexing
+                                if (first_bracket_pos != std::string::npos && last_bracket_pos != std::string::npos && theo_len == payload_length)
+                                {
+                                        frame = sv.substr(first_bracket_pos, theo_len - 1);
+                                        break;
+                                }
+                        }
+                        //Flush buffer
+                        memset(buf, 0, sizeof(buf));
+                }
         }
-        std::cout << str << "\n";
+        std::cout << frame << "\n";
+        std::cout << "Hanging Loop" << std::endl;
 
         // Shutdown
         int ret_shutdown = -1;
         while ((ret_shutdown = SSL_shutdown(ssl)) != 1)
         {
-                if (ret_shutdown < 0 && handle_io_errors(ssl, ret_shutdown) == spctr::SSL_ERROR::TAME) continue;
+                if (ret_shutdown < 0 && handle_io_errors(ssl, ret_shutdown) == SSL_ERROR::TAME) continue;
                 std::cerr << "Fatal error while shutting down\n";
                 exit(EXIT_FAILURE);
         }
@@ -164,7 +203,7 @@ void spctr::soul::form()
         SSL_CTX_free(ctx);
 }
 
-void spctr::soul::wait_for_select_read_write(SSL *ssl, bool write)
+void soul::wait_for_select_read_write(SSL *ssl, bool write)
 {
         fd_set fds;
         int width, sock;
@@ -176,7 +215,7 @@ void spctr::soul::wait_for_select_read_write(SSL *ssl, bool write)
         else select(width, &fds, NULL, NULL, NULL);
 }
 
-void spctr::soul::set_ws_url()
+void soul::set_ws_url()
 {
         SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
         if (ctx == NULL)
@@ -334,16 +373,16 @@ void spctr::soul::set_ws_url()
         using namespace nlohmann;
         auto j = json::parse(payload);
         std::string temp = j["url"];
+        // REMOVE
         temp.append("/?v=10&encoding=json");
         std::string_view sv(temp);
         this->ws_url = sv;
 }
 
-spctr::SSL_ERROR spctr::soul::handle_io_errors(SSL *ssl, int return_value)
+SSL_ERROR soul::handle_io_errors(SSL *ssl, int return_value)
 {
         switch(SSL_get_error(ssl, return_value))
         {
-                using namespace spctr;
                 case SSL_ERROR_WANT_READ:
                         wait_for_select_read_write(ssl, false);
                         return SSL_ERROR::TAME;

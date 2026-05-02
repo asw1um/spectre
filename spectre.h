@@ -10,6 +10,7 @@
 #include <cstring>
 #include <errno.h>
 #include <stdio.h>
+#include <bitset>
 
 #include <netdb.h>
 #include <sys/socket.h>
@@ -33,20 +34,44 @@ namespace spctr
                 END_OF_FILE,
                 TAME,
         };
+        
+        enum class OPCODE
+        {
+                CONT = 0x0,
+                TEXT = 0x1,
+                BIN = 0x2,
+                CONN_CLOSE = 0x8,
+                PING = 0x9,
+                PONG = 0xA,
+        };
 
         // Util functions
         std::size_t get_content_length(std::string_view http_response);
         std::string get_payload_str(std::string_view http_response);
         void extract_host_name(std::string &url);
+        unsigned long df_get_payload_length(std::string &payload);
+
+        // Data Frame Class 
+        class data_frame
+        {
+                bool fin;
+                unsigned int opcode;
+                bool masked;
+                int payload_length;
+                std::string payload_data;
+                
+                public:
+                        data_frame();
+                        ~data_frame();
+        };
 
         // Bot class
         class soul
         {       
-                private:
-                        std::string ws_url;
-                        void set_ws_url();
-                        void wait_for_select_read_write(SSL *ssl, bool write);
-                        spctr::SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
+                std::string ws_url;
+                void set_ws_url();
+                void wait_for_select_read_write(SSL *ssl, bool write);
+                SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
 
                 public:
                         soul();

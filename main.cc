@@ -1,7 +1,9 @@
 #include "spectre.h"
 
+using namespace spctr;
+
 int main()
 {
-        spctr::soul obj{};
+        soul obj{};
         obj.form();
 }
