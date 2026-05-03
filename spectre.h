@@ -37,12 +37,17 @@ namespace spctr
         
         enum class OPCODE
         {
-                CONT = 0x0,
-                TEXT = 0x1,
-                BIN = 0x2,
-                CONN_CLOSE = 0x8,
-                PING = 0x9,
-                PONG = 0xA,
+                DISPATCH,
+                HEARTBEAT,
+                IDENTIFY,
+                VOICE_STATE_UPDATE = 4,
+                RESUME = 6,
+                RECONNECT,
+                REQUEST_GUILD_MEMBERS,
+                INVALID_SESSION,
+                HELLO,
+                HEARTBEAT_ACK,
+                REQUEST_CHANNEL_INFO = 43
         };
 
         // Util functions
@@ -69,7 +74,6 @@ namespace spctr
         class soul
         {       
                 std::string ws_url;
-                void set_ws_url();
                 void wait_for_select_read_write(SSL *ssl, bool write);
                 SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
 

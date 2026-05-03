@@ -2,10 +2,167 @@
 
 using SOCKET = int;
 using namespace spctr;
+using namespace nlohmann;
 
 soul::soul()
 {
-        this->set_ws_url();
+        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        if (ctx == NULL)
+        {
+                std::cout << "Failed to create the SSL_CTX\n";
+                exit(EXIT_FAILURE);
+        }
+
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+
+        if (!SSL_CTX_set_default_verify_paths(ctx))
+        {
+                std::cout << "Failed to set the default trusted certificate store\n";
+                exit(EXIT_FAILURE);
+        }
+
+        if (!SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION))
+        {
+                std::cout << "Failed to set the minimum TLS protocol version\n"; 
+                exit(EXIT_FAILURE);
+        }
+
+        SSL *ssl = SSL_new(ctx);
+        if (ssl == NULL)
+        {
+                std::cout << "Failed to create the SSL object\n";
+                exit(EXIT_FAILURE);
+        }
+
+        int getaddrinfo_status = -1;
+        struct addrinfo hints{};
+        hints.ai_family = AF_INET;              // care about IPV4 only
+        hints.ai_socktype = SOCK_STREAM;        // socket is TCP
+        hints.ai_flags = AI_PASSIVE;
+
+        struct addrinfo *servinfo;
+        getaddrinfo_status = getaddrinfo("discord.com", "https", &hints, &servinfo);
+        if (getaddrinfo_status != 0)
+        {
+                std::cerr << "getaddrinfo: " << gai_strerror(getaddrinfo_status) << "\n";
+                exit(EXIT_FAILURE);
+        }
+
+        SOCKET main_sock = -1;
+        for (struct addrinfo *p = servinfo; p != NULL; p = p->ai_next)
+        {
+                using namespace std;
+                main_sock = socket(p->ai_family, p->ai_socktype, 0);
+                if (main_sock == -1)
+                {
+                        cerr << "Failed to create socket.\n";
+                        exit(EXIT_FAILURE);
+                }
+
+                int conn_status = connect(main_sock, p->ai_addr, p->ai_addrlen);
+                if (conn_status != 0) 
+                {
+                        close(main_sock);
+                        main_sock = -1;
+                        continue;
+                }
+                break; 
+        } 
+
+        BIO *bio;
+        bio = BIO_new(BIO_s_socket());
+        if (bio == NULL)
+        {
+                BIO_closesocket(main_sock);
+                exit(EXIT_FAILURE);
+        }
+
+        BIO_set_fd(bio, main_sock, BIO_CLOSE);
+
+        SSL_set_bio(ssl, bio, bio);
+
+        if (!SSL_set_tlsext_host_name(ssl, "discord.com"))
+        {
+                std::cerr << "Failed to set the SNI hostname\n";
+                exit(EXIT_FAILURE);
+        }
+
+        if (!SSL_set1_host(ssl, "discord.com"))
+        {
+                std::cerr << "Failed to set the certificate verification hostname\n";
+                exit(EXIT_FAILURE);
+        }
+
+        int ssl_conn_status = SSL_connect(ssl);
+        if (ssl_conn_status < 1)
+        {
+                std::cerr << "Failed to connect to the server\n";
+                if (SSL_get_verify_result(ssl) != X509_V_OK)
+                {
+                        std::cerr << "Verify error: " << X509_verify_cert_error_string(SSL_get_verify_result(ssl)) << "\n";
+                }
+                exit(EXIT_FAILURE);
+        }
+
+        size_t written;
+        const char *req = "GET /api/v10/gateway HTTP/1.1\r\nHost: discord.com\r\nUser-Agent: SPECTRE/1.0.0\r\nAccept: */*\r\nConnection: close\r\n\r\n\r\n";
+        if (!SSL_write_ex(ssl, req, strlen(req), &written))
+        {
+                std::cerr << "Failed to write HTTP request\n";
+                exit(EXIT_FAILURE);
+        }
+
+        size_t read_bytes;
+        char buf[64];
+        std::string request;
+
+        bool PAYLOAD_FOUND = false;
+        std::size_t payload_len = std::string::npos;
+        std::string payload;
+        while(SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes)) 
+        {
+                if (PAYLOAD_FOUND) continue;
+                request.append(buf, read_bytes);
+                std::string_view sv{request};
+                std::size_t content_length_pos = sv.find("Content-Length: ");
+
+                // We need eol_escape to ensure that we actuall have a number in the current sv
+                std::size_t eol_escape = sv.find("\r", content_length_pos);
+
+                if (content_length_pos != std::string::npos && eol_escape != std::string::npos) 
+                {
+                        payload_len = get_content_length(sv.substr(content_length_pos, eol_escape - content_length_pos));
+                }                
+
+                std::size_t payload_pos = sv.find("\r\n\r\n");
+                if (payload_pos != std::string::npos && (payload_pos + 4) < sv.length()) 
+                {
+                        payload_pos += 4;
+                        std::size_t substr_len = sv.substr(payload_pos, sv.length()).length();
+                        if (substr_len == payload_len) 
+                        {
+                                payload = sv.substr(payload_pos, sv.find_last_of("}", payload_pos));
+                                PAYLOAD_FOUND = true;
+                        }                        
+                }
+        }
+
+        // std::cerr print may be unnecessary here
+        if (SSL_get_error(ssl, 0) != SSL_ERROR_ZERO_RETURN) std::cerr << "Failed reading remaining data\n";
+
+        int ret = SSL_shutdown(ssl);
+        if (ret < 1)
+        {
+                std::cerr << "Error shutting down\n";
+                exit(EXIT_FAILURE);
+        }
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+
+        auto j = json::parse(payload);
+        std::string temp = j["url"];
+        std::string_view sv(temp);
+        this->ws_url = sv;
 }
 
 soul::~soul()
@@ -180,7 +337,7 @@ void soul::form()
                                 std::size_t theo_len = last_bracket_pos - first_bracket_pos + 1;        // +1 to account for zero-based indexing
                                 if (first_bracket_pos != std::string::npos && last_bracket_pos != std::string::npos && theo_len == payload_length)
                                 {
-                                        frame = sv.substr(first_bracket_pos, theo_len - 1);
+                                        frame = sv.substr(first_bracket_pos, theo_len);
                                         break;
                                 }
                         }
@@ -188,8 +345,16 @@ void soul::form()
                         memset(buf, 0, sizeof(buf));
                 }
         }
-        std::cout << frame << "\n";
-        std::cout << "Hanging Loop" << std::endl;
+        auto j = json::parse(frame);
+        std::cout << j.dump(4) << std::endl;
+
+        /* EPOLL */
+        int epoll_fd = epoll_create1(0);
+        if (epoll_fd == -1)
+        {
+                std::cerr << "Failed to create epoll file descriptor\n";
+                exit(EXIT_FAILURE);
+        }
 
         // Shutdown
         int ret_shutdown = -1;
@@ -213,170 +378,6 @@ void soul::wait_for_select_read_write(SSL *ssl, bool write)
         FD_SET(sock, &fds);
         if (write) select(width, NULL, &fds, NULL, NULL);
         else select(width, &fds, NULL, NULL, NULL);
-}
-
-void soul::set_ws_url()
-{
-        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
-        if (ctx == NULL)
-        {
-                std::cout << "Failed to create the SSL_CTX\n";
-                exit(EXIT_FAILURE);
-        }
-
-        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-
-        if (!SSL_CTX_set_default_verify_paths(ctx))
-        {
-                std::cout << "Failed to set the default trusted certificate store\n";
-                exit(EXIT_FAILURE);
-        }
-        
-        if (!SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION))
-        {
-                std::cout << "Failed to set the minimum TLS protocol version\n"; 
-                exit(EXIT_FAILURE);
-        }
-
-        SSL *ssl = SSL_new(ctx);
-        if (ssl == NULL)
-        {
-                std::cout << "Failed to create the SSL object\n";
-                exit(EXIT_FAILURE);
-        }
-        
-        int getaddrinfo_status = -1;
-        struct addrinfo hints{};
-        hints.ai_family = AF_INET;              // care about IPV4 only
-        hints.ai_socktype = SOCK_STREAM;        // socket is TCP
-        hints.ai_flags = AI_PASSIVE;
-        
-        struct addrinfo *servinfo;
-        getaddrinfo_status = getaddrinfo("discord.com", "https", &hints, &servinfo);
-        if (getaddrinfo_status != 0)
-        {
-                std::cerr << "getaddrinfo: " << gai_strerror(getaddrinfo_status) << "\n";
-                exit(EXIT_FAILURE);
-        }
-
-        SOCKET main_sock = -1;
-        for (struct addrinfo *p = servinfo; p != NULL; p = p->ai_next)
-        {
-                using namespace std;
-                main_sock = socket(p->ai_family, p->ai_socktype, 0);
-                if (main_sock == -1)
-                {
-                        cerr << "Failed to create socket.\n";
-                        exit(EXIT_FAILURE);
-                }
-
-                int conn_status = connect(main_sock, p->ai_addr, p->ai_addrlen);
-                if (conn_status != 0) 
-                {
-                        close(main_sock);
-                        main_sock = -1;
-                        continue;
-                }
-                break; 
-        } 
-
-        BIO *bio;
-        bio = BIO_new(BIO_s_socket());
-        if (bio == NULL)
-        {
-                BIO_closesocket(main_sock);
-                exit(EXIT_FAILURE);
-        }
-        
-        BIO_set_fd(bio, main_sock, BIO_CLOSE);
-
-        SSL_set_bio(ssl, bio, bio);
-
-        if (!SSL_set_tlsext_host_name(ssl, "discord.com"))
-        {
-                std::cerr << "Failed to set the SNI hostname\n";
-                exit(EXIT_FAILURE);
-        }
-        
-        if (!SSL_set1_host(ssl, "discord.com"))
-        {
-                std::cerr << "Failed to set the certificate verification hostname\n";
-                exit(EXIT_FAILURE);
-        }
-        
-        int ssl_conn_status = SSL_connect(ssl);
-        if (ssl_conn_status < 1)
-        {
-                std::cerr << "Failed to connect to the server\n";
-                if (SSL_get_verify_result(ssl) != X509_V_OK)
-                {
-                        std::cerr << "Verify error: " << X509_verify_cert_error_string(SSL_get_verify_result(ssl)) << "\n";
-                }
-                exit(EXIT_FAILURE);
-        }
-
-        size_t written;
-        const char *req = "GET /api/v10/gateway HTTP/1.1\r\nHost: discord.com\r\nUser-Agent: SPECTRE/1.0.0\r\nAccept: */*\r\nConnection: close\r\n\r\n\r\n";
-        if (!SSL_write_ex(ssl, req, strlen(req), &written))
-        {
-                std::cerr << "Failed to write HTTP request\n";
-                exit(EXIT_FAILURE);
-        }
-        
-        size_t read_bytes;
-        char buf[64];
-        std::string request;
-
-        bool PAYLOAD_FOUND = false;
-        std::size_t payload_len = std::string::npos;
-        std::string payload;
-        while(SSL_read_ex(ssl, buf, sizeof(buf), &read_bytes)) 
-        {
-                if (PAYLOAD_FOUND) continue;
-                request.append(buf, read_bytes);
-                std::string_view sv{request};
-                std::size_t content_length_pos = sv.find("Content-Length: ");
-
-                // We need eol_escape to ensure that we actuall have a number in the current sv
-                std::size_t eol_escape = sv.find("\r", content_length_pos);
-
-                if (content_length_pos != std::string::npos && eol_escape != std::string::npos) 
-                {
-                        payload_len = get_content_length(sv.substr(content_length_pos, eol_escape - content_length_pos));
-                }                
-
-                std::size_t payload_pos = sv.find("\r\n\r\n");
-                if (payload_pos != std::string::npos && (payload_pos + 4) < sv.length()) 
-                {
-                        payload_pos += 4;
-                        std::size_t substr_len = sv.substr(payload_pos, sv.length()).length();
-                        if (substr_len == payload_len) 
-                        {
-                                payload = sv.substr(payload_pos, sv.find_last_of("}", payload_pos));
-                                PAYLOAD_FOUND = true;
-                        }                        
-                }
-        }
-        
-        // std::cerr print may be unnecessary here
-        if (SSL_get_error(ssl, 0) != SSL_ERROR_ZERO_RETURN) std::cerr << "Failed reading remaining data\n";
-
-        int ret = SSL_shutdown(ssl);
-        if (ret < 1)
-        {
-                std::cerr << "Error shutting down\n";
-                exit(EXIT_FAILURE);
-        }
-        SSL_free(ssl);
-        SSL_CTX_free(ctx);
-
-        using namespace nlohmann;
-        auto j = json::parse(payload);
-        std::string temp = j["url"];
-        // REMOVE
-        temp.append("/?v=10&encoding=json");
-        std::string_view sv(temp);
-        this->ws_url = sv;
 }
 
 SSL_ERROR soul::handle_io_errors(SSL *ssl, int return_value)
