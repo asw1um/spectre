@@ -18,3 +18,5 @@ std::size_t spctr::get_content_length(std::string_view http_response)
         std::string str(http_response.substr(bpos, len));
         return (std::size_t) std::stoull(str, nullptr);
 }
+
+

@@ -2,6 +2,21 @@
 
 using namespace spctr;
 
+template <std::size_t N>
+void flip_bitset(std::bitset<N> &bs)
+{
+        std::size_t start = 0;
+        std::size_t end = N - 1;
+        while (start < end)
+        {
+                int temp = bs[start];
+                bs[start] = bs[end];
+                bs[end] = temp;
+                start++;
+                end--;
+        }
+}
+
 // TODO: SAFETY IMPLEMENTATIONS
 // p[2] must exist and mask bit must be 0
 // These are assumed currently but checks should be done for safety!
@@ -54,17 +69,12 @@ unsigned long spctr::df_get_payload_length(std::string &payload_buf)
 }
 
 
-data_frame::data_frame(bool i_fin, WS_OPCODE i_opcode, bool i_masked)
+data_frame::data_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, bool i_masked)
 {
         this->fin = i_fin;
-        this->opcode = i_opcode;
+        this->ws_opcode = i_ws_opcode;
+        this->dc_opcode = i_dc_opcode;
         this->masked = i_masked;
-        std::cout << "Data Frame Constructor\n";
-}
-
-data_frame::~data_frame()
-{
-        std::cout << "Data Frame Destructor\n";
 }
 
 uint32_t data_frame::generate_masking_key()
@@ -75,36 +85,57 @@ uint32_t data_frame::generate_masking_key()
         return (uint32_t) distrib(gen);
 }
 
-void data_frame::mask_payload(uint32_t &masking_key, std::size_t &payload_length, std::string &payload)
+void data_frame::mask_payload(uint32_t &masking_key, std::string &i_payload)
 {
         std::bitset<32> key(masking_key);                 
+        flip_bitset(key);
+        std::size_t payload_length = i_payload.length();
+        std::string transformed_data;
         for(std::size_t i = 0; i < payload_length; ++i)
         {
                 int j = i % 4;
-                payload[i] = payload[i] ^ key[j];
+                std::bitset<8> octet;
+                for (int k = 0; k < 8; ++k)
+                {
+                        octet[k] = key[k + 8*j];
+                }
+                unsigned long octet_val = octet.to_ulong();
+                unsigned char octet_char = static_cast<char>(octet_val);
+                i_payload[i] = i_payload[i] ^ octet_char;
         }
+        this->payload = i_payload;
 }
 
-SPCTR_ERROR data_frame::validate_payload(std::string_view payload)
+SPCTR_ERROR data_frame::validate_payload()
 {
-        std::size_t len = payload.length();
+        std::size_t len = this->payload.length();
         if (len < 4096) return SPCTR_ERROR::PAYLOAD_OK;
         else return SPCTR_ERROR::PAYLOAD_TOO_LONG;
 }
 
-heartbeat_frame::heartbeat_frame(bool i_fin, WS_OPCODE i_opcode, std::size_t i_payload_length, std::string i_payload) : data_frame(i_fin, i_opcode, true)
+heartbeat_frame::heartbeat_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, unsigned long int i_seq_num) : data_frame(i_fin, i_ws_opcode, i_dc_opcode, true)
 {
         this->masking_key = this->generate_masking_key();
-        SPCTR_ERROR valid = validate_payload(i_payload);
+        this->seq_num = i_seq_num;
+        this->payload = this->construct_payload();
+        SPCTR_ERROR valid = validate_payload();
         if (valid == SPCTR_ERROR::PAYLOAD_TOO_LONG) 
         {
                 std::cerr << "Supplied Payload is Too Long";
                 exit(EXIT_FAILURE);
         }
-        this->payload_length = i_payload_length;
-        this->mask_payload(this->masking_key, i_payload_length, i_payload);
+        this->payload_length = this->payload.length();
+        this->mask_payload(this->masking_key, this->payload);
 }
 
+/* 
+ * It's likely that this function is incomplete, since the larger payload case hasn't been tested
+ * There's some strange behaviour occuring when doing operations using bitset, regarding the ordering
+ * It is imperative that the bits be ordered in Big Endian format, so they must be flipped/unflipped accordingly
+ * bitset stores them in little endian ordering 
+ *
+ * Perhaps a wrapped class would solve this
+ */
 std::string heartbeat_frame::build_frame()
 {
         std::bitset<8> first_byte;
@@ -112,46 +143,120 @@ std::string heartbeat_frame::build_frame()
         first_byte[1] = 0;
         first_byte[2] = 0;
         first_byte[3] = 0;
-        int opcode = static_cast<int>(this->opcode);
+        int opcode = static_cast<int>(this->ws_opcode);
         std::bitset<4> opcode_bits(opcode);
+        flip_bitset(opcode_bits);
         
         // Discord rejects all payloads greater than 4096 bytes
         for (int i = 4; i < 8; ++i) first_byte[i] = opcode_bits[i-4];
+        unsigned char first_char = static_cast<char>(first_byte.to_ulong());
 
-        char mask_bit = static_cast<char>(this->masked);
         if (this->payload_length < 126)
         {
+                std::bitset<8> second_byte;
+                second_byte[0] = 1;
                 std::bitset<7> payload_len(this->payload_length);
+                flip_bitset(payload_len);
+                for (int i = 1; i < 8; ++i) second_byte[i] = payload_len[i-1];
                 std::bitset<32> masking_key_bits(this->masking_key);
+                flip_bitset(masking_key_bits);
+                
+                flip_bitset(second_byte);
+                unsigned char second_char = static_cast<char>(second_byte.to_ulong());
 
+                std::string masking_key_chars;
+                for (int i = 0; i < 32; i+=8)
+                {
+                        std::bitset<8> tbs; 
+                        for (int j = 0; j < 8; ++j)
+                        {
+                                tbs[j] = masking_key_bits[j + i]; 
+                        }
+                        masking_key_chars.append(1, static_cast<char>(tbs.to_ulong()));
+                }
                 // Serialize Masked Data
-                std::size_t num_bits = this->payload_length * 8;
-                std::string final_frame = first_byte.to_string();
-                final_frame.append(opcode_bits.to_string(), 4);
-                final_frame.append(1, mask_bit);
-                final_frame.append(payload_len.to_string(), 7);
-                final_frame.append(masking_key_bits.to_string(), 32);
+                std::string final_frame;
+                final_frame.append(1, first_char);
+                final_frame.append(1, second_char);
+                final_frame.append(masking_key_chars);
                 final_frame.append(this->payload);
                 this->cached_frame = final_frame;
                 return final_frame;
         }
+
+        // Serialize Masked Data
         std::bitset<7> payload_len(126);
         std::bitset<16> ex_payload_len(this->payload_length);
         std::bitset<32> masking_key_bits(this->masking_key);
+        flip_bitset(payload_len);
+        flip_bitset(ex_payload_len);
+        flip_bitset(masking_key_bits);
 
-        // Serialize Masked Data
-        std::string final_frame = first_byte.to_string();
-        final_frame.append(opcode_bits.to_string(), 4);
-        final_frame.append(1, mask_bit);
-        final_frame.append(payload_len.to_string(), 7);
-        final_frame.append(ex_payload_len.to_string(), 16);
-        final_frame.append(masking_key_bits.to_string(), 32);
+        std::bitset<8> second_byte;
+        second_byte[0] = this->masked;
+        for (int i = 1; i < 8; ++i) second_byte[i] = payload_len[i-1];
+        flip_bitset(second_byte);
+
+        unsigned char second_char = static_cast<char>(second_byte.to_ulong());
+
+        std::string ex_payload_len_chars;
+        for (int i = 0; i < 2; i+=2)
+        {
+                std::bitset<8> tbs;
+                for (int j = 0; j < 8; ++j)
+                {
+                        tbs[j] = ex_payload_len[j+i];
+                }
+                ex_payload_len_chars.append(1, static_cast<char>(tbs.to_ulong()));
+        }
+
+        std::string masking_key_chars;
+        for (int i = 0; i < 32; i+=8)
+        {
+                std::bitset<8> tbs; 
+                for (int j = 0; j < 8; ++j)
+                {
+                        tbs[j] = masking_key_bits[j + i]; 
+                }
+                masking_key_chars.append(1, static_cast<char>(tbs.to_ulong()));
+        }
+
+        std::string final_frame;
+        final_frame.append(1, first_char);
+        final_frame.append(1, second_char);
+        final_frame.append(ex_payload_len_chars);
+        final_frame.append(masking_key_chars);
         final_frame.append(this->payload);
         this->cached_frame = final_frame;
         return final_frame;
 }
 
-// std::string_view ro_build_frame()
-// {
-//
-// }
+/* 
+ * The definition of this function is rather dangerous since we don't provide any default values in the class definition
+ * We are forced to remember to call this function last 
+ * I.E This should change
+ */
+std::string heartbeat_frame::construct_payload()
+{
+        using ordered_json = nlohmann::ordered_json;
+        using std::to_string;   
+        if (this->seq_num == 0) 
+        {
+                ordered_json j;
+                j["op"] = DC_OPCODE::HEARTBEAT;
+                j["d"] = nlohmann::json::value_t::null;
+                auto jstr = to_string(j);
+                return jstr;
+        }
+        ordered_json j;
+        j["op"] = DC_OPCODE::HEARTBEAT;
+        j["d"] = this->seq_num;
+        auto jstr = to_string(j);
+        return jstr;
+}
+
+void heartbeat_frame::print_unmasked_payload(std::string copy_frame)
+{
+        this->mask_payload(this->masking_key, copy_frame);
+        std::cout << copy_frame << "\n";
+}

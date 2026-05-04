@@ -392,8 +392,15 @@ void soul::form()
         heartbeat_event.events = EPOLLIN;
         heartbeat_event.data.fd = heartbeat_fd;
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, heartbeat_fd, &heartbeat_event);
+
+        // Configure WS Event(s)
+        struct epoll_event ws_event;
+        ws_event.events = EPOLLIN | EPOLLOUT;
+        ws_event.data.fd = SSL_get_fd(ssl);
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, SSL_get_fd(ssl), &ws_event);
         
         /* Main Read Loop */
+        // This loop has SO many nests it's kind of ugly
         int nfds = -1;
         bool first_heartbeat_sent = false;
         bool heartbeat_ack_recieved = false;
@@ -411,6 +418,7 @@ void soul::form()
                 {
                         if (events[i].data.fd == heartbeat_fd)
                         {
+                                // Might have to double loop to check if the socket is writable
                                 uint64_t temp_buf;
                                 int read_status = read(heartbeat_fd, &temp_buf, sizeof(temp_buf));
                                 if (read_status != -1)
@@ -418,12 +426,31 @@ void soul::form()
                                         if (!first_heartbeat_sent)
                                         {
                                                 // Send First Heartbeat Here
-                                                std::string test_load = "{\"d\":{\"heartbeat\":215152451}}";
-                                                heartbeat_frame fr(1, WS_OPCODE::TXT, test_load.length(), test_load);
-                                                std::cout << fr.build_frame() << "\n";
+                                                heartbeat_frame fr(1, WS_OPCODE::TXT, DC_OPCODE::HEARTBEAT, sequence_number);
+                                                for (int j = 0; j < nfds && j != i; ++j)
+                                                {
+                                                        if (events[j].data.fd == SSL_get_fd(ssl) && events[j].events & EPOLLOUT)
+                                                        {
+                                                                // Socket Ready for Write
+                                                                std::string built_frame = fr.build_frame();
+                                                                std::string testy = fr.get_payload();
+                                                                std::cout << testy << "\n";
+                                                                std::size_t bytes_written = 0;
+                                                                std::size_t write_status = SSL_write_ex(ssl, built_frame.data(), built_frame.size(), &bytes_written);
+                                                                if (write_status < 0) std::cerr << "Error: Could not write correct number of bytes.\n"; 
+                                                        }
+                                                }
                                                 first_heartbeat_sent = true;
                                         }
-                                        std::cout << "Must send heartbeat\n";
+                                }
+                        }
+                        if (events[i].data.fd == SSL_get_fd(ssl) && events[i].events & EPOLLIN)
+                        {
+                                char buf_r[4096];
+                                size_t read_bytes = 0;
+                                while(SSL_read_ex(ssl, buf_r, sizeof(buf_r), &read_bytes))
+                                {
+                                        std::cout << buf_r << "\n";
                                 }
                         }
                 }

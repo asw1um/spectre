@@ -49,6 +49,9 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Implement throwing exceptions for _frame classes
 -   [ ] Consider building payload in _frame classes rather than passing as arg
 -   [ ] payload_length can be implicitly determined for frames rather than explicitly given as arg
+-   [ ] Separate Code for Initial Get Request, WS Upgrade, and Main WS Loop
+-   [ ] Switch all variable declarations to auto = type-id {} style to avoid undefined behaviour
+-   [ ] Make a more robust bit class to handle the operations being done for the data frames
 
 # Notes
 - string_view is faster than std::string& so use string_view for read-only operations
