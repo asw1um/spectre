@@ -362,7 +362,6 @@ void soul::form()
         std::mt19937 gen(rd());
         std::uniform_real_distribution<double> distrib(0,1);
         double jitter = distrib(gen);
-        std::cout << jitter << "\n";
 
         // Geat Heartbeat Interval
         unsigned long heartbeat_interval_ms = j["d"]["heartbeat_interval"];
@@ -397,6 +396,8 @@ void soul::form()
         /* Main Read Loop */
         int nfds = -1;
         bool first_heartbeat_sent = false;
+        bool heartbeat_ack_recieved = false;
+        long long sequence_number = 0;
         while (true)
         {
                 nfds = epoll_wait(epoll_fd, events, 10, -1);
@@ -419,6 +420,7 @@ void soul::form()
                                                 // Send First Heartbeat Here
                                                 std::string test_load = "{\"d\":{\"heartbeat\":215152451}}";
                                                 heartbeat_frame fr(1, WS_OPCODE::TXT, test_load.length(), test_load);
+                                                std::cout << fr.build_frame() << "\n";
                                                 first_heartbeat_sent = true;
                                         }
                                         std::cout << "Must send heartbeat\n";

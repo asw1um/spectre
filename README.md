@@ -47,6 +47,8 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Generalize error handling with custom logger
 -   [x] Implement checker to ensure payload is not over 4096 bytes
 -   [ ] Implement throwing exceptions for _frame classes
+-   [ ] Consider building payload in _frame classes rather than passing as arg
+-   [ ] payload_length can be implicitly determined for frames rather than explicitly given as arg
 
 # Notes
 - string_view is faster than std::string& so use string_view for read-only operations

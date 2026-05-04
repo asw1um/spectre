@@ -77,40 +77,37 @@ namespace spctr
         std::string get_payload_str(std::string_view http_response);
         void extract_host_name(std::string &url);
         unsigned long df_get_payload_length(std::string &payload);
-
+        
+        // Class is abstract due to existence of pure virtual functions
         class data_frame
         {
-                bool fin;
-                WS_OPCODE opcode;
-                bool masked;
                 protected:
+                        bool fin;
+                        WS_OPCODE opcode;
+                        bool masked;
+                        uint32_t masking_key;
+                        std::size_t payload_length;
+                        std::string payload;    /* Payload stored in masked form */
+                        std::string cached_frame; /* Everytime build_frame is called frame should be cached */
+
                         uint32_t generate_masking_key();
                         void mask_payload(uint32_t &masking_key, std::size_t &payload_length, std::string &payload);
                         SPCTR_ERROR validate_payload(std::string_view payload);
                 public:
                         data_frame(bool i_fin, WS_OPCODE i_opcode, bool i_masked);
+                        WS_OPCODE get_opcode() { return this->opcode; }
                         ~data_frame();
+                        
+                        virtual std::string build_frame() = 0;
+                        // virtual std::string_view ro_build_frame() = 0; /* Get's a read only copy of the frame*/ 
         };
 
         class heartbeat_frame : data_frame
         {
-                uint32_t masking_key;
-                std::size_t payload_length;
-                std::string payload; /* Payload is masked */
                 public:
-                        heartbeat_frame(bool i_fin, WS_OPCODE i_opcode, std::size_t i_payload_length, std::string i_payload) : data_frame(i_fin, i_opcode, true)
-                        {
-                                this->masking_key = this->generate_masking_key();
-                                std::cout << this->masking_key << "\n";
-                                SPCTR_ERROR valid = validate_payload(i_payload);
-                                if (valid == SPCTR_ERROR::PAYLOAD_TOO_LONG) 
-                                {
-                                        std::cerr << "Supplied Payload is Too Long";
-                                        exit(EXIT_FAILURE);
-                                }
-                                this->payload_length = i_payload_length;
-                                this->mask_payload(this->masking_key, i_payload_length, i_payload);
-                        }
+                        heartbeat_frame(bool i_fin, WS_OPCODE i_opcode, std::size_t i_payload_length, std::string i_payload);
+                        std::string build_frame();
+
                         std::string_view get_payload_sv()
                         {
                                 std::string_view sv(this->payload);

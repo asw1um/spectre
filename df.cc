@@ -83,7 +83,6 @@ void data_frame::mask_payload(uint32_t &masking_key, std::size_t &payload_length
                 int j = i % 4;
                 payload[i] = payload[i] ^ key[j];
         }
-        std::cout << payload << "\n";
 }
 
 SPCTR_ERROR data_frame::validate_payload(std::string_view payload)
@@ -92,3 +91,67 @@ SPCTR_ERROR data_frame::validate_payload(std::string_view payload)
         if (len < 4096) return SPCTR_ERROR::PAYLOAD_OK;
         else return SPCTR_ERROR::PAYLOAD_TOO_LONG;
 }
+
+heartbeat_frame::heartbeat_frame(bool i_fin, WS_OPCODE i_opcode, std::size_t i_payload_length, std::string i_payload) : data_frame(i_fin, i_opcode, true)
+{
+        this->masking_key = this->generate_masking_key();
+        SPCTR_ERROR valid = validate_payload(i_payload);
+        if (valid == SPCTR_ERROR::PAYLOAD_TOO_LONG) 
+        {
+                std::cerr << "Supplied Payload is Too Long";
+                exit(EXIT_FAILURE);
+        }
+        this->payload_length = i_payload_length;
+        this->mask_payload(this->masking_key, i_payload_length, i_payload);
+}
+
+std::string heartbeat_frame::build_frame()
+{
+        std::bitset<8> first_byte;
+        first_byte[0] = this->fin;
+        first_byte[1] = 0;
+        first_byte[2] = 0;
+        first_byte[3] = 0;
+        int opcode = static_cast<int>(this->opcode);
+        std::bitset<4> opcode_bits(opcode);
+        
+        // Discord rejects all payloads greater than 4096 bytes
+        for (int i = 4; i < 8; ++i) first_byte[i] = opcode_bits[i-4];
+
+        char mask_bit = static_cast<char>(this->masked);
+        if (this->payload_length < 126)
+        {
+                std::bitset<7> payload_len(this->payload_length);
+                std::bitset<32> masking_key_bits(this->masking_key);
+
+                // Serialize Masked Data
+                std::size_t num_bits = this->payload_length * 8;
+                std::string final_frame = first_byte.to_string();
+                final_frame.append(opcode_bits.to_string(), 4);
+                final_frame.append(1, mask_bit);
+                final_frame.append(payload_len.to_string(), 7);
+                final_frame.append(masking_key_bits.to_string(), 32);
+                final_frame.append(this->payload);
+                this->cached_frame = final_frame;
+                return final_frame;
+        }
+        std::bitset<7> payload_len(126);
+        std::bitset<16> ex_payload_len(this->payload_length);
+        std::bitset<32> masking_key_bits(this->masking_key);
+
+        // Serialize Masked Data
+        std::string final_frame = first_byte.to_string();
+        final_frame.append(opcode_bits.to_string(), 4);
+        final_frame.append(1, mask_bit);
+        final_frame.append(payload_len.to_string(), 7);
+        final_frame.append(ex_payload_len.to_string(), 16);
+        final_frame.append(masking_key_bits.to_string(), 32);
+        final_frame.append(this->payload);
+        this->cached_frame = final_frame;
+        return final_frame;
+}
+
+// std::string_view ro_build_frame()
+// {
+//
+// }
