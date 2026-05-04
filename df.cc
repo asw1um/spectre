@@ -2,7 +2,7 @@
 
 using namespace spctr;
 
-// SAFETY IMPLEMENTATIONS
+// TODO: SAFETY IMPLEMENTATIONS
 // p[2] must exist and mask bit must be 0
 // These are assumed currently but checks should be done for safety!
 // return std::optional?
@@ -53,12 +53,42 @@ unsigned long spctr::df_get_payload_length(std::string &payload_buf)
         }
 }
 
-data_frame::data_frame()
+
+data_frame::data_frame(bool i_fin, WS_OPCODE i_opcode, bool i_masked)
 {
+        this->fin = i_fin;
+        this->opcode = i_opcode;
+        this->masked = i_masked;
         std::cout << "Data Frame Constructor\n";
 }
 
 data_frame::~data_frame()
 {
         std::cout << "Data Frame Destructor\n";
+}
+
+uint32_t data_frame::generate_masking_key()
+{
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<uint32_t> distrib(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max());
+        return (uint32_t) distrib(gen);
+}
+
+void data_frame::mask_payload(uint32_t &masking_key, std::size_t &payload_length, std::string &payload)
+{
+        std::bitset<32> key(masking_key);                 
+        for(std::size_t i = 0; i < payload_length; ++i)
+        {
+                int j = i % 4;
+                payload[i] = payload[i] ^ key[j];
+        }
+        std::cout << payload << "\n";
+}
+
+SPCTR_ERROR data_frame::validate_payload(std::string_view payload)
+{
+        std::size_t len = payload.length();
+        if (len < 4096) return SPCTR_ERROR::PAYLOAD_OK;
+        else return SPCTR_ERROR::PAYLOAD_TOO_LONG;
 }

@@ -271,7 +271,7 @@ void soul::form()
         unsigned char rand_bytes[16];
         RAND_bytes(rand_bytes, sizeof(rand_bytes));
         unsigned char encoded[25];
-        int encoded_len = EVP_EncodeBlock(encoded, rand_bytes, 16);
+        EVP_EncodeBlock(encoded, rand_bytes, 16);
         int needed = std::snprintf(nullptr, 0, "GET /?v=10&encoding=json HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", ws_host_name.data(), encoded);
         std::string s(needed, '\0');
         std::snprintf(s.data(), needed + 1, "GET /?v=10&encoding=json HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", ws_host_name.data(), encoded);
@@ -345,15 +345,86 @@ void soul::form()
                         memset(buf, 0, sizeof(buf));
                 }
         }
+
+        // Print Out Hello Message
         auto j = json::parse(frame);
         std::cout << j.dump(4) << std::endl;
+        
+        /* Heartbeat FD */
+        int heartbeat_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
+        if (heartbeat_fd == -1)
+        {
+                perror("Heartbeat FD");
+                exit(EXIT_FAILURE);
+        }
+        // Generate Random Jitter Value
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<double> distrib(0,1);
+        double jitter = distrib(gen);
+        std::cout << jitter << "\n";
+
+        // Geat Heartbeat Interval
+        unsigned long heartbeat_interval_ms = j["d"]["heartbeat_interval"];
+        unsigned long heartbeat_interval_s = heartbeat_interval_ms / 1000;
+        
+        struct itimerspec heartbeat_interval;
+        heartbeat_interval.it_interval.tv_sec = heartbeat_interval_s;
+        heartbeat_interval.it_value.tv_sec = heartbeat_interval_s * jitter;
+
+        int heartbeat_fd_settime_status = timerfd_settime(heartbeat_fd, NULL, &heartbeat_interval, NULL);
+        if (heartbeat_fd_settime_status == -1)
+        {
+                perror("timerfd_settime() Heartbeat Error");
+                exit(EXIT_FAILURE);
+        }
 
         /* EPOLL */
+        // Edge Triggered
         int epoll_fd = epoll_create1(0);
         if (epoll_fd == -1)
         {
                 std::cerr << "Failed to create epoll file descriptor\n";
                 exit(EXIT_FAILURE);
+        }
+
+        // Configure Heartbeat Event 
+        struct epoll_event heartbeat_event, events[10];
+        heartbeat_event.events = EPOLLIN;
+        heartbeat_event.data.fd = heartbeat_fd;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, heartbeat_fd, &heartbeat_event);
+        
+        /* Main Read Loop */
+        int nfds = -1;
+        bool first_heartbeat_sent = false;
+        while (true)
+        {
+                nfds = epoll_wait(epoll_fd, events, 10, -1);
+                if (nfds == -1)
+                {
+                        perror("epoll_wait");
+                        exit(EXIT_FAILURE);
+                }
+
+                for (int i = 0; i < nfds; ++i)
+                {
+                        if (events[i].data.fd == heartbeat_fd)
+                        {
+                                uint64_t temp_buf;
+                                int read_status = read(heartbeat_fd, &temp_buf, sizeof(temp_buf));
+                                if (read_status != -1)
+                                {
+                                        if (!first_heartbeat_sent)
+                                        {
+                                                // Send First Heartbeat Here
+                                                std::string test_load = "{\"d\":{\"heartbeat\":215152451}}";
+                                                heartbeat_frame fr(1, WS_OPCODE::TXT, test_load.length(), test_load);
+                                                first_heartbeat_sent = true;
+                                        }
+                                        std::cout << "Must send heartbeat\n";
+                                }
+                        }
+                }
         }
 
         // Shutdown

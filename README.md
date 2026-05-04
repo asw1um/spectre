@@ -44,6 +44,9 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Refactor set_ws_url() and form() member functions to be more concise
 -   [ ] Make while read logic more understandble
 -   [ ] Incorporate data_frame class which is built over time rather than an outright constructor (Perhaps a struct here is better)
+-   [ ] Generalize error handling with custom logger
+-   [x] Implement checker to ensure payload is not over 4096 bytes
+-   [ ] Implement throwing exceptions for _frame classes
 
 # Notes
 - string_view is faster than std::string& so use string_view for read-only operations
