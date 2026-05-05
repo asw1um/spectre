@@ -1,11 +1,16 @@
 #include "spectre.h"
+#include <cstddef>
+#include <openssl/ssl.h>
+#include <string_view>
+#include <sys/epoll.h>
 
 using SOCKET = int;
 using namespace spctr;
 using namespace nlohmann;
 
-soul::soul() : log_instance()
+soul::soul(std::string_view i_bot_token) : log_instance()
 {
+        this->bot_token = i_bot_token;
         SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
         if (ctx == NULL)
         {
@@ -416,6 +421,7 @@ void soul::form()
         int nfds = -1;
         bool first_heartbeat_sent = false;
         bool heartbeat_ack_recieved = false;
+        bool identify_frame_sent = false;
         long long sequence_number = 0;
         while (true)
         {
@@ -428,6 +434,18 @@ void soul::form()
 
                 for (int i = 0; i < nfds; ++i)
                 {
+                        if (events[i].data.fd == SSL_get_fd(ssl) && events[i].events & EPOLLOUT && identify_frame_sent == false)
+                        {
+                                // Send Identity Frame  
+                                identify_frame iframe(true, WS_OPCODE::TXT, DC_OPCODE::IDENTIFY, this->bot_token);
+                                std::size_t str_frame_sz = iframe.build_frame();
+                                std::string str_frame = iframe.get_frame();
+                                auto bytes_written = std::size_t{};
+                                auto a = std::string{iframe.get_raw_payload()};
+                                std::size_t write_status = SSL_write_ex(ssl, str_frame.data(), str_frame_sz, &bytes_written);
+                                if (write_status < 0) std::cerr << "Error: Could not write correct number of bytes.\n"; 
+                                identify_frame_sent = true;
+                        }
                         if (events[i].data.fd == heartbeat_fd)
                         {
                                 // Might have to double loop to check if the socket is writable
@@ -444,11 +462,12 @@ void soul::form()
                                                         if (events[j].data.fd == SSL_get_fd(ssl) && events[j].events & EPOLLOUT)
                                                         {
                                                                 // Socket Ready for Write
-                                                                std::string built_frame = fr.build_frame();
+                                                                std::size_t built_frame_sz = fr.build_frame();
+                                                                std::string built_frame = fr.get_frame();
                                                                 std::string testy = fr.get_payload();
                                                                 std::cout << testy << "\n";
                                                                 std::size_t bytes_written = 0;
-                                                                std::size_t write_status = SSL_write_ex(ssl, built_frame.data(), built_frame.size(), &bytes_written);
+                                                                std::size_t write_status = SSL_write_ex(ssl, built_frame.data(), built_frame_sz, &bytes_written);
                                                                 if (write_status < 0) std::cerr << "Error: Could not write correct number of bytes.\n"; 
                                                         }
                                                 }
@@ -462,8 +481,11 @@ void soul::form()
                                 size_t read_bytes = 0;
                                 while(SSL_read_ex(ssl, buf_r, sizeof(buf_r), &read_bytes))
                                 {
-                                        std::cout << buf_r << "\n";
+                                        this->log_instance.log(buf_r, LOG_LEVEL::INFO);
                                 }
+
+                                //Flush Buffer
+                                memset(buf, 0, sizeof(buf));
                         }
                         if (events[i].data.fd == this->log_instance.get_event_fd())
                         {

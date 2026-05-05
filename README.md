@@ -30,22 +30,16 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 
 # TODO 
 -   [ ] Use Get Gateway Bot instead of Get Gateway (Boot Process)
--   [ ] Change relevant std::size_t lens to initialize to std::string::npos
--   [ ] Use autotools to make a compilation script
 -   [ ] Remember to free relevant items when done
 -   [ ] addrinfo struct (linked list) needs to be freed after address is obtained
--   [ ] Think of a better class name (rather than bot)
--   [ ] Set up a logging fd so log events trigger an event in epoll to print something during the infinite loop
 -   [ ] Refactor socket creation and ssl setup so that there is less code repetition
--   [ ] Replace relevant couts with cerr
--   [x] Abstract basic select() waiting (needed for handshake and shutdown)
 -   [ ] Replace relevant bools with enums
--   [x] handle_io_errors() should return enum not int
 -   [ ] Refactor set_ws_url() and form() member functions to be more concise
 -   [ ] Make while read logic more understandble
 -   [ ] Incorporate data_frame class which is built over time rather than an outright constructor (Perhaps a struct here is better)
 -   [ ] Generalize error handling with custom logger
--   [x] Implement checker to ensure payload is not over 4096 bytes
+-   [ ] Move all necessary events to Main Read Loop
+-   [ ] Refactor handle_io_errors 
 -   [ ] Implement throwing exceptions for _frame classes
 -   [ ] Consider building payload in _frame classes rather than passing as arg
 -   [ ] payload_length can be implicitly determined for frames rather than explicitly given as arg
@@ -56,6 +50,10 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Make log queue thread-safe
 -   [ ] Make calls to write to eventfd safe
 -   [ ] Replace std::cout with log events that work with errno
+-   [ ] Code that builds frame could be abstracted to data frame abstract class
+-   [ ] Check if Payload Length checks are necessary for spectre payloads (they are 100% necessary for user payloads)
+-   [ ] Implement Intents Enum
+-   [ ] Have user supply Enum vs hardcoding it
 
 # Notes
 - string_view is faster than std::string& so use string_view for read-only operations

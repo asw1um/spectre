@@ -2,7 +2,9 @@
 #define SPECTRE_H
 
 #include <iostream>
+#include <fstream>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <stdint.h>
 #include <cstdlib>
@@ -118,9 +120,14 @@ namespace spctr
                         SPCTR_ERROR validate_payload();
                 public:
                         data_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE dc_opcode, bool i_masked);
-                        
                         virtual std::string construct_payload() = 0;
-                        virtual std::string build_frame() = 0;
+                        virtual std::string get_frame() = 0;
+
+                        /* 
+                         * Returns Size of Frame 
+                         * This is preferred over using chached_frame.size() in the case of an early null terminator
+                         */
+                        virtual std::size_t build_frame() = 0; 
         };
 
         class heartbeat_frame : data_frame
@@ -129,7 +136,7 @@ namespace spctr
                 public:
                         heartbeat_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, unsigned long int i_seq_num);
                         std::string construct_payload();
-                        std::string build_frame();
+                        std::size_t build_frame();
                         void print_unmasked_payload(std::string copy_frame);
                         void set_seq_num(unsigned long int i_seq_num)
                         {
@@ -140,6 +147,29 @@ namespace spctr
                                 std::string copy = this->payload;
                                 this->mask_payload(this->masking_key, copy);
                                 return copy;
+                        }
+                        std::string get_frame()
+                        {
+                                return this->cached_frame;
+                        }
+        };
+
+        class identify_frame: data_frame
+        {
+                std::string_view bot_token;
+                public:
+                        identify_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, std::string_view i_bot_token);
+                        std::string construct_payload();
+                        std::size_t build_frame();
+                        std::string get_frame()
+                        {
+                                return this->cached_frame;
+                        }
+                        std::string get_raw_payload()
+                        {
+                                auto c = std::string{this->payload};
+                                mask_payload(this->masking_key, c);
+                                return c;
                         }
         };
 
@@ -170,14 +200,12 @@ namespace spctr
                 void wait_for_select_read_write(SSL *ssl, bool write);
                 SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
                 logger log_instance;
-
+                std::string_view bot_token;
                 public:
-                        soul();
+                        soul(std::string_view i_bot_token);
                         ~soul();
                         void form();
                         void log(std::string_view output, LOG_LEVEL log_level);
         };
 }
-
-
 #endif // !SPECTRE_H
