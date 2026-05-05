@@ -11,15 +11,17 @@
 #include <cstring>
 #include <errno.h>
 #include <stdio.h>
+#include <time.h>
 #include <bitset>
 #include <random>
-
 #include <netdb.h>
+#include <queue>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
+#include <sys/eventfd.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <openssl/bio.h>
@@ -79,6 +81,24 @@ namespace spctr
                 PAYLOAD_TOO_LONG,
         };
 
+        enum class LOG_LEVEL
+        {
+                DEBUG,
+                INFO,
+                SUCCESS,
+                WARNING,
+                ERROR,
+                CRITICAL
+        };
+        
+        /* Only USER should be accessible, others are used within spectre code */
+        enum class LOG_SUPPLIER
+        {
+                SYS,
+                DISCORD,
+                SPECTRE,
+                USER
+        };
        
         // Class is abstract due to existence of pure virtual functions
         class data_frame
@@ -123,28 +143,41 @@ namespace spctr
                         }
         };
 
+        struct log_msg 
+        {
+                std::string_view msg;
+                LOG_LEVEL log_level;
+        };
+
+        class logger
+        {
+                int event_fd;
+                bool deferred = true;
+                std::queue<log_msg> log_buf;
+                std::string get_time();
+                public:
+                        logger();
+                        ~logger();
+                        int get_event_fd();
+                        void init_event_fd();
+                        void log(std::string_view output, LOG_LEVEL log_level);
+                        void log_all_queue();
+        };
+
         class soul
         {       
                 std::string ws_url;
                 void wait_for_select_read_write(SSL *ssl, bool write);
                 SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
+                logger log_instance;
 
                 public:
                         soul();
-                        void form();
                         ~soul();
+                        void form();
+                        void log(std::string_view output, LOG_LEVEL log_level);
         };
 }
 
-// Will be useful for logger later
-namespace color 
-{
-        constexpr const char* reset   = "\033[0m";
-        constexpr const char* red     = "\033[31m";
-        constexpr const char* green   = "\033[32m";
-        constexpr const char* yellow  = "\033[33m";
-        constexpr const char* blue    = "\033[34m";
-        constexpr const char* bold    = "\033[1m";
-}
 
 #endif // !SPECTRE_H

@@ -1,5 +1,5 @@
 CXX	:= clang++
-CXXFLAGS	:= -Wall -Wextra -O0 -g -Iinclude
+CXXFLAGS	:= -Wall -Wextra -Wuninitialized -O0 -g -Iinclude
 LDLIBS	:= -lssl -lcrypto
 
 SRCS	:= $(wildcard *.cc)
@@ -12,7 +12,7 @@ $(TARGET): $(OBJS)
 	$(CXX) $(OBJS) $(LDLIBS) -o $@
 
 %.o: %.cc
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@ 
 
 clean:
 	rm -f $(OBJS) $(TARGET)

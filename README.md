@@ -20,7 +20,7 @@ Low Level Architecture (Single Threaded)
     -   timerfd for the heartbeat interval
     -   Sends a notification when timer expires
 -   eventfd for when an event is ready to be handled (initiated by user side)
-    -   Unlikely to be the case since events are first ack by Discord before response
+    - Used for log events
 
 Higher Level Architecture:
 -   Class that defines a bot object, then to use it you must create a class that inherits from the bot object with your own initialization.
@@ -52,6 +52,10 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 -   [ ] Separate Code for Initial Get Request, WS Upgrade, and Main WS Loop
 -   [ ] Switch all variable declarations to auto = type-id {} style to avoid undefined behaviour
 -   [ ] Make a more robust bit class to handle the operations being done for the data frames
+-   [ ] Rename SPCTR_ERROR enum class
+-   [ ] Make log queue thread-safe
+-   [ ] Make calls to write to eventfd safe
+-   [ ] Replace std::cout with log events that work with errno
 
 # Notes
 - string_view is faster than std::string& so use string_view for read-only operations

@@ -4,7 +4,7 @@ using SOCKET = int;
 using namespace spctr;
 using namespace nlohmann;
 
-soul::soul()
+soul::soul() : log_instance()
 {
         SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
         if (ctx == NULL)
@@ -163,6 +163,11 @@ soul::soul()
         std::string temp = j["url"];
         std::string_view sv(temp);
         this->ws_url = sv;
+}
+
+void soul::log(std::string_view output, LOG_LEVEL log_level)
+{
+        this->log_instance.log(output, log_level);
 }
 
 soul::~soul()
@@ -367,11 +372,11 @@ void soul::form()
         unsigned long heartbeat_interval_ms = j["d"]["heartbeat_interval"];
         unsigned long heartbeat_interval_s = heartbeat_interval_ms / 1000;
         
-        struct itimerspec heartbeat_interval;
+        struct itimerspec heartbeat_interval = {};
         heartbeat_interval.it_interval.tv_sec = heartbeat_interval_s;
         heartbeat_interval.it_value.tv_sec = heartbeat_interval_s * jitter;
 
-        int heartbeat_fd_settime_status = timerfd_settime(heartbeat_fd, NULL, &heartbeat_interval, NULL);
+        int heartbeat_fd_settime_status = timerfd_settime(heartbeat_fd, 0, &heartbeat_interval, NULL);
         if (heartbeat_fd_settime_status == -1)
         {
                 perror("timerfd_settime() Heartbeat Error");
@@ -398,6 +403,13 @@ void soul::form()
         ws_event.events = EPOLLIN | EPOLLOUT;
         ws_event.data.fd = SSL_get_fd(ssl);
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, SSL_get_fd(ssl), &ws_event);
+
+        // Configure Logger
+        this->log_instance.init_event_fd();
+        struct epoll_event log_event;
+        log_event.events = EPOLLIN;
+        log_event.data.fd = this->log_instance.get_event_fd();
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, this->log_instance.get_event_fd(), &log_event);
         
         /* Main Read Loop */
         // This loop has SO many nests it's kind of ugly
@@ -452,6 +464,10 @@ void soul::form()
                                 {
                                         std::cout << buf_r << "\n";
                                 }
+                        }
+                        if (events[i].data.fd == this->log_instance.get_event_fd())
+                        {
+                                this->log_instance.log_all_queue();
                         }
                 }
         }

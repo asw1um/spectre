@@ -255,7 +255,7 @@ std::string heartbeat_frame::construct_payload()
         return jstr;
 }
 
-void heartbeat_frame::print_unmasked_payload(std::string copy_frame)
+inline void heartbeat_frame::print_unmasked_payload(std::string copy_frame)
 {
         this->mask_payload(this->masking_key, copy_frame);
         std::cout << copy_frame << "\n";
