@@ -8,8 +8,9 @@ using SOCKET = int;
 using namespace spctr;
 using namespace nlohmann;
 
-soul::soul(std::string_view i_bot_token) : log_instance()
+soul::soul(std::string_view i_bot_token, INTENTS i_intents) : log_instance()
 {
+        this->intents = i_intents;
         this->bot_token = i_bot_token;
         SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
         if (ctx == NULL)
@@ -437,7 +438,7 @@ void soul::form()
                         if (events[i].data.fd == SSL_get_fd(ssl) && events[i].events & EPOLLOUT && identify_frame_sent == false)
                         {
                                 // Send Identity Frame  
-                                identify_frame iframe(true, WS_OPCODE::TXT, DC_OPCODE::IDENTIFY, this->bot_token);
+                                identify_frame iframe(true, WS_OPCODE::TXT, DC_OPCODE::IDENTIFY, this->bot_token, this->intents);
                                 std::size_t str_frame_sz = iframe.build_frame();
                                 std::string str_frame = iframe.get_frame();
                                 auto bytes_written = std::size_t{};

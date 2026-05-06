@@ -60,6 +60,7 @@ It is possible to use OpenSSL BIO libraries to do address lookup, see [here](htt
 - CRLF separates header and payload (we assume discord api behaves nicely)
 - Each line ends with a CRLF, whereas header ends with CRLFCRLF
 - Content-Length int contans \n at end of payload
+- Checks inside main read loop are mostly done through ints so a switch statement could be used for efficiency
 
 ## Websocket Protocol Notes
 [Source](https://datatracker.ietf.org/doc/html/rfc6455#section-5)

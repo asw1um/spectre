@@ -1,4 +1,5 @@
 #include "spectre.h"
+#include <cstdint>
 
 using namespace spctr;
 
@@ -262,8 +263,9 @@ inline void heartbeat_frame::print_unmasked_payload(std::string copy_frame)
 }
 
 
-identify_frame::identify_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, std::string_view i_bot_token) : data_frame(i_fin, i_ws_opcode, i_dc_opcode, true)
+identify_frame::identify_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, std::string_view i_bot_token, INTENTS &i_intents) : data_frame(i_fin, i_ws_opcode, i_dc_opcode, true)
 {
+        this->intents = i_intents;
         this->bot_token = i_bot_token;
         this->masking_key = this->generate_masking_key();
         this->payload = this->construct_payload();
@@ -289,7 +291,7 @@ std::string identify_frame::construct_payload()
         j["d"]["properties"]["device"] = "spectre";
         j["d"]["compress"] = false;
         j["d"]["shard"] = nlohmann::json::array({0,1});
-        j["d"]["intents"] = 8;
+        j["d"]["intents"] = static_cast<uint16_t>(this->intents);
         auto jstr = to_string(j);
         return jstr;
 }

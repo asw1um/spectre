@@ -1,6 +1,8 @@
 #ifndef SPECTRE_H
 #define SPECTRE_H
 
+#include <cstdint>
+#include <type_traits>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -32,6 +34,13 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <nlohmann/json.hpp>
+
+#define DEFINE_ENUM_CLASS_BITWISE_OPERATORS(Enum)                   \
+    inline constexpr Enum operator|(Enum Lhs, Enum Rhs) {           \
+        return static_cast<Enum>(                                   \
+            static_cast<std::underlying_type_t<Enum>>(Lhs) |        \
+            static_cast<std::underlying_type_t<Enum>>(Rhs));        \
+    }                                                               \
 
 namespace spctr
 {
@@ -101,6 +110,22 @@ namespace spctr
                 SPECTRE,
                 USER
         };
+        
+        /*          
+         * Intents to indicate what set events user wants to handle 
+         * We overload | operator so user can chain values together
+         */
+        enum class INTENTS : uint16_t
+        {
+                GUILDS = 1 << 0,
+                GUILD_MEMBERS = 1 << 1,
+                GUILD_VOICE_STATES = 1 << 7,
+                GUILD_MESSAGES = 1 << 9,
+                DIRECT_MESSAGES = 1 << 12,
+                MESSAGE_CONTENT = 1 << 15,
+                ALL = GUILDS | GUILD_MEMBERS | GUILD_VOICE_STATES | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
+        };
+        DEFINE_ENUM_CLASS_BITWISE_OPERATORS(INTENTS);
        
         // Class is abstract due to existence of pure virtual functions
         class data_frame
@@ -157,8 +182,9 @@ namespace spctr
         class identify_frame: data_frame
         {
                 std::string_view bot_token;
+                INTENTS intents;
                 public:
-                        identify_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, std::string_view i_bot_token);
+                        identify_frame(bool i_fin, WS_OPCODE i_ws_opcode, DC_OPCODE i_dc_opcode, std::string_view i_bot_token, INTENTS &i_intents);
                         std::string construct_payload();
                         std::size_t build_frame();
                         std::string get_frame()
@@ -201,8 +227,9 @@ namespace spctr
                 SSL_ERROR handle_io_errors(SSL *ssl, int return_value);
                 logger log_instance;
                 std::string_view bot_token;
+                INTENTS intents;
                 public:
-                        soul(std::string_view i_bot_token);
+                        soul(std::string_view i_bot_token, INTENTS i_intents);
                         ~soul();
                         void form();
                         void log(std::string_view output, LOG_LEVEL log_level);

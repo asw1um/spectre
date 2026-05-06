@@ -1,6 +1,4 @@
 #include "spectre.h"
-#include <fstream>
-#include <nlohmann/json.hpp>
 
 using namespace spctr;
 using json = nlohmann::json;
@@ -13,6 +11,6 @@ int main()
         json data = json::parse(f);
         f.close();
         const std::string BOT_TOKEN = data["token"].get<std::string>();
-        soul obj{BOT_TOKEN};
+        soul obj{BOT_TOKEN, INTENTS::MESSAGE_CONTENT | INTENTS::GUILD_MESSAGES | INTENTS::GUILDS};
         obj.form();
 }
